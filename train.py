@@ -1,64 +1,62 @@
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
 from agents.data_agent import fetch_stock_data
 from agents.feature_engineer_agent import FeatureEngineerAgent
 from agents.prediction_agent import PredictionAgent
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-import numpy as np
+from utils.pipeline import SEQUENCE_LENGTH, create_sequences
 
-SEQUENCE_LENGTH = 10
+DEFAULT_PERIOD = "2y"  # 6mo leaves only ~65 training windows
 
-def create_sequences(df, target_column="Close", seq_len=SEQUENCE_LENGTH):
-    print("📦 Creating sequences...")
-    features = df.drop(columns=[target_column]).values
-    target = df[target_column].values
 
-    X, y = [], []
-    for i in range(len(df) - seq_len):
-        X.append(features[i:i+seq_len])
-        y.append(target[i+seq_len])
-    return np.array(X), np.array(y)
-
-def evaluate_model(name, y_true, y_pred):
-    mse = mean_squared_error(y_true, y_pred)
-    rmse = mse ** 0.5
+def evaluate_model(name, y_true, y_pred, last_close):
+    rmse = mean_squared_error(y_true, y_pred) ** 0.5
     mae = mean_absolute_error(y_true, y_pred)
-    print(f"📊 {name} RMSE: {round(rmse, 4)} | MAE: {round(mae, 4)}")
+    naive_rmse = mean_squared_error(y_true, last_close) ** 0.5
+    actual_dir = np.sign(y_true - last_close)
+    pred_dir = np.sign(y_pred - last_close)
+    dir_acc = np.mean(actual_dir == pred_dir) * 100
+    print(f"{name:<12} RMSE: {rmse:8.4f} | MAE: {mae:8.4f} | "
+          f"vs naive: {rmse / naive_rmse:5.3f} | direction: {dir_acc:5.1f}%")
+    return rmse
 
-def train_pipeline():
-    df = fetch_stock_data("AAPL", period="6mo", interval="1d")
-    print("📋 Columns in fetched DataFrame:", df.columns.tolist())
-    print("🔍 Initial df shape:", df.shape)
 
-    engineer = FeatureEngineerAgent()
-    df = engineer.add_indicators(df).dropna()
-    print("✅ After feature engineering:", df.shape)
+def train_pipeline(symbol="AAPL", period=DEFAULT_PERIOD, interval="1d", seed=0):
+    df = fetch_stock_data(symbol, period=period, interval=interval)
+    print("Initial df shape:", df.shape)
 
-    X, y = create_sequences(df)
-    print("📈 X shape:", X.shape, "| y shape:", y.shape)
+    df = FeatureEngineerAgent().add_indicators(df)
+    X, y, last_close, next_close, _ = create_sequences(df)
+    print("X shape:", X.shape, "| y shape:", y.shape)
 
     split = int(len(X) * 0.8)
     X_train, X_test = X[:split], X[split:]
-    y_train, y_test = y[:split], y[split:]
+    y_train = y[:split]
+    lc_test, price_test = last_close[split:], next_close[split:]
 
-    agent = PredictionAgent()
+    agent = PredictionAgent(seed=seed).fit_scaler(X_train)
 
-    print("🧠 Training BiLSTM...")
+    print("Training BiLSTM...")
     agent.train_bilstm(X_train, y_train)
-    y_pred_bilstm = agent.bilstm_model.predict(X_test).flatten()
-    evaluate_model("BiLSTM", y_test, y_pred_bilstm)
-
-    print("🧠 Training XGBoost...")
-    X_flat = X.reshape(X.shape[0], -1)
-    agent.train_xgboost(X_flat[:split], y_train)
-    y_pred_xgb = agent.xgb_model.predict(X_flat[split:])
-    evaluate_model("XGBoost", y_test, y_pred_xgb)
-
-    print("🧠 Training Transformer...")
+    print("Training XGBoost...")
+    agent.train_xgboost(X_train, y_train)
+    print("Training Transformer...")
     agent.train_transformer(X_train, y_train)
-    y_pred_transformer = agent.transformer_model.predict(X_test).flatten()
-    evaluate_model("Transformer", y_test, y_pred_transformer)
 
-    agent.save_models()
-    print("💾 Models saved.")
+    print(f"\nTest set: {len(X_test)} windows. Prices reconstructed as last_close * (1 + predicted return).")
+    print("'vs naive' < 1 beats the 'tomorrow = today' baseline.")
+    evaluate_model("Naive", price_test, lc_test, lc_test)
+    preds = agent.predict(X_test)
+    for name, ret in preds.items():
+        evaluate_model(name, price_test, lc_test * (1 + ret), lc_test)
+    ensemble = np.mean(list(preds.values()), axis=0)
+    evaluate_model("Ensemble", price_test, lc_test * (1 + ensemble), lc_test)
+
+    agent.save_models(symbol=symbol, period=period, interval=interval,
+                      sequence_length=SEQUENCE_LENGTH)
+    print("Models saved.")
+    return agent
+
 
 if __name__ == "__main__":
     train_pipeline()

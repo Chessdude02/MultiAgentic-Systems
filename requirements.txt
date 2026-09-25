@@ -3,6 +3,8 @@ tensorflow
 scikit-learn
 xgboost
 yfinance
+ta
+joblib
 optuna
 pandas
 numpy
