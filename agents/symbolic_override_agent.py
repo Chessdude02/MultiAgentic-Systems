@@ -6,11 +6,11 @@ class SymbolicOverrideAgent:
         signal_line = df["Signal"]
 
         for i in range(len(predictions)):
+            pred = float(predictions[i])
             try:
                 r = float(rsi.iloc[i])
                 macd = float(macd_line.iloc[i])
                 signal = float(signal_line.iloc[i])
-                pred = float(predictions[i])
 
                 if r < 30 and macd > signal:
                     adjusted.append(pred * 1.02)

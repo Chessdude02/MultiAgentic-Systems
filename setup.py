@@ -1,9 +1,12 @@
+import os
+
 from setuptools import setup, find_packages
 
 setup(
     name='multiagent-predictor',
     version='0.1.0',
-    packages=find_packages(include=['agents', 'models', 'utils', 'tests', '*']),
+    packages=find_packages(include=['agents', 'utils']),
+    py_modules=['cli', 'train', 'app', 'simulator'],
     install_requires=[
         'yfinance>=0.2.31',
         'pandas>=2.0.0',
@@ -13,7 +16,9 @@ setup(
         'xgboost>=1.7.0',
         'shap>=0.42',
         'tensorflow>=2.9.0',
-        'joblib>=1.3.0'
+        'joblib>=1.3.0',
+        'ta>=0.10',
+        'matplotlib>=3.5',
     ],
     entry_points={
         'console_scripts': [

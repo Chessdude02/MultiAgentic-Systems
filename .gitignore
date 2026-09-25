@@ -5,3 +5,5 @@ agents/__pycache__/
 utils/__pycache__/
 *.pyc
 .env
+.venv311/
+data/
