@@ -20,6 +20,10 @@ the next ``--retrain-every`` sessions. Training data = S&P 500 stocks
     Stacked         regime-aware blend of HAR/GARCH/XGBoost/XGBoost-QLIKE whose
                     weights vary with VIX, fitted on *earlier folds'*
                     out-of-sample forecasts
+    Blend           v3, specified before running: the same four forecasts
+                    with constant weights >= 0 that sum to 1 and no intercept
+                    (so it cannot extrapolate beyond its inputs), least squares
+                    on earlier folds' out-of-sample forecasts
 
 Return bands use normal quantiles, or (``calibrated``) the empirical quantiles
 of past out-of-sample standardised returns.
@@ -50,10 +54,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(HERE, "results")
 HAR_COLS = ["har_d", "har_w", "har_m"]
 MODELS = ["Trailing 22d", "HAR", "GARCH(1,1)", "XGBoost", "XGBoost-QLIKE",
-          "XGBoost +BC", "Combo", "Stacked"]
+          "XGBoost +BC", "Combo", "Stacked", "Blend"]
 COL = {"Trailing 22d": "cc_22", "HAR": "p_har", "GARCH(1,1)": "p_garch",
        "XGBoost": "p_xgb", "XGBoost-QLIKE": "p_xgbq", "XGBoost +BC": "p_bc",
-       "Combo": "p_combo", "Stacked": "p_stack"}
+       "Combo": "p_combo", "Stacked": "p_stack", "Blend": "p_blend"}
 STACK_BASE = ["p_har", "p_garch", "p_xgb", "p_xgbq"]
 CALIBRATE = ["XGBoost", "XGBoost-QLIKE", "Stacked"]
 BC_HALFLIFE = 126
@@ -205,6 +209,33 @@ def stack(oos, folds):
         coef, *_ = np.linalg.lstsq(_stack_design(tr, mu, sd), tr["fwd_logvol"].values, rcond=None)
         p[te_mask] = _stack_design(oos[te_mask], mu, sd) @ coef
         weights = coef
+    return p, weights
+
+
+def _simplex_lstsq(X, y):
+    """argmin ||Xw - y||^2  s.t. w >= 0, sum(w) = 1."""
+    from scipy.optimize import minimize
+    XtX, Xty, k = X.T @ X, X.T @ y, X.shape[1]
+    res = minimize(lambda w: w @ XtX @ w - 2 * w @ Xty, np.full(k, 1 / k),
+                   jac=lambda w: 2 * (XtX @ w - Xty), method="SLSQP",
+                   bounds=[(0, 1)] * k, constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1}])
+    return res.x
+
+
+def blend(oos, folds):
+    """Constant convex combination of STACK_BASE, refit per fold on earlier
+    folds' OOS forecasts with realised targets. Combo until enough history."""
+    d = oos.index.get_level_values("Date")
+    every5 = set(d.unique().sort_values()[::5])
+    p = oos["p_combo"].copy()
+    weights = None
+    for start, end, train_end in folds:
+        tr = oos[(d <= train_end) & d.isin(every5)].dropna(subset=["fwd_logvol"])
+        if len(tr) < 20_000:
+            continue
+        weights = _simplex_lstsq(tr[STACK_BASE].values, tr["fwd_logvol"].values)
+        m = (d >= start) & (d <= end)
+        p[m] = oos.loc[m, STACK_BASE].values @ weights
     return p, weights
 
 
@@ -394,6 +425,7 @@ def main():
     oos, last_model, folds = walk_forward(panel, prices, args.warmup_years, args.retrain_every, args.jobs)
     oos["p_bc"] = bias_correct(oos)
     oos["p_stack"], stack_w = stack(oos, folds)
+    oos["p_blend"], blend_w = blend(oos, folds)
     bands, band_k = {}, {}
     for m in CALIBRATE:
         bands[m], band_k[m] = calibrated_bands(oos, folds, COL[m])
@@ -422,6 +454,7 @@ def main():
         ("2a. Diebold-Mariano t-stats: Stacked vs each (t > 2 => Stacked significantly better)",
          dm_table(ev_stocks, "Stacked")),
         ("2b. Diebold-Mariano t-stats: XGBoost vs each", dm_table(ev_stocks, "XGBoost")),
+        ("2c. Diebold-Mariano t-stats: Blend vs each", dm_table(ev_stocks, "Blend")),
         ("3a. RMSE by year - stocks", breakdown(ev_stocks, d.year)),
         ("3b. RMSE by VIX regime - stocks", breakdown(ev_stocks, regime.values)),
         ("3c. QLIKE by VIX regime - stocks", breakdown(ev_stocks, regime.values, "qlike")),
@@ -433,6 +466,8 @@ def main():
         ("6. Monthly inverse-vol stock portfolios (10 bps)", inverse_vol_portfolios(ev_stocks, 10)),
         ("7. Stacked blend coefficients, last fold (VIX standardised)",
          pd.DataFrame({"coef": stack_w}, index=stack_names)),
+        ("8. Constrained Blend weights, last fold",
+         pd.DataFrame({"weight": blend_w}, index=[c[2:] for c in STACK_BASE])),
     ]
     for title, table in sections:
         print(f"\n=== {title}")

@@ -1,0 +1,40 @@
+{
+  "features": [
+    "har_d",
+    "har_w",
+    "har_m",
+    "har_q",
+    "cc_22",
+    "cc_66",
+    "cc_252",
+    "down_share",
+    "overnight_share",
+    "vol_of_vol",
+    "ret_5",
+    "ret_22",
+    "drawdown_252",
+    "beta_66",
+    "corr_66",
+    "mkt_har_d",
+    "mkt_har_w",
+    "mkt_har_m",
+    "log_vix",
+    "vix_vs_rv",
+    "vix_chg_5",
+    "log_dollar_vol",
+    "volume_z",
+    "days_since_earn",
+    "earn_react",
+    "is_fund"
+  ],
+  "horizon": 20,
+  "k80": 1.2476914468868157,
+  "k95": 1.991948925745435,
+  "trained_through": "2026-08-26",
+  "holdout": {
+    "from": "2024-08-22",
+    "rows": 247379,
+    "rmse_log_vol": 0.31995463371276855,
+    "bias_log_vol": 0.03651253879070282
+  }
+}

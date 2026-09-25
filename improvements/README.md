@@ -102,6 +102,26 @@ All settings were fixed before the v2 run.
 | **Stacked** regime-aware blend (weights vary with VIX, learned on earlier folds' OOS forecasts) | Get XGBoost in calm markets and the Combo in crises | **Failed.** Worse than XGBoost on MSE (DM t = -2.8). It was trained on calm 2004-07 data and extrapolated badly into 2008-09 (RMSE 0.451 vs 0.406); still weakest with VIX > 30. It wins in many calm years after 2012. |
 | **Bias correction** (subtract each ticker's recent realised error) | Remove persistent per-ticker bias | **Failed for stocks.** Adds noise (QLIKE 0.355 vs 0.331). Removes SPY bias (-0.004) but doesn't improve vol targeting. |
 
+**v3: constrained Blend (specified before running).** After the stacked blend
+failed, I declared one follow-up design before running it, to limit data
+snooping: the same four forecasts with constant weights >= 0 that sum to 1,
+no intercept and no VIX term, fit on earlier folds' out-of-sample forecasts.
+Every other model reproduced exactly.
+
+| | RMSE | R² | QLIKE | 2008 RMSE | VIX > 30 RMSE |
+|---|---|---|---|---|---|
+| XGBoost | 0.329 | 0.558 | 0.331 | 0.406 | 0.394 |
+| XGBoost-QLIKE | 0.335 | 0.541 | **0.298** | 0.386 | 0.390 |
+| Stacked (v2) | 0.333 | 0.546 | 0.331 | 0.451 | 0.422 |
+| **Blend (v3)** | **0.328** | **0.561** | 0.319 | 0.397 | 0.378 |
+
+- It fixed the stacking failure: no crisis blow-up (2008: 0.397 vs 0.451).
+- It has the best point accuracy of any forecast, but this is a **statistical tie with
+  XGBoost** on MSE (DM t = -0.02). It's marginally better on QLIKE (t = 2.0).
+- It is still clearly behind XGBoost-QLIKE on QLIKE (t = -4.3), and it doesn't
+  help SPY vol targeting (Sharpe 0.84).
+- Weights in the last fold: XGBoost 0.61, HAR 0.21, XGBoost-QLIKE 0.12, GARCH 0.06.
+
 **Vol targeting is still best with plain trailing vol.** Removing XGBoost's
 index bias lifted its SPY vol-targeting Sharpe from 0.81 to 0.84 (exposure
 0.76 → 0.92), but trailing vol (0.88) and the Stacked blend (0.87) still do
@@ -114,8 +134,24 @@ forecast accuracy.
 - Single-stock risk (sizing, 20-day ranges, stop distances): **XGBoost-QLIKE**,
   with calibrated bands. It has the fewest dangerous under-predictions in
   every market regime.
-- Point forecasts judged by squared error: plain XGBoost.
+- Point forecasts judged by squared error: the constrained Blend or plain XGBoost
+  (statistically tied). The Blend holds up better in crises.
 - Index vol targeting: trailing 22-day vol. It's simpler and still the best here.
+
+## Production risk model and AI brief
+
+`risk_model.py` packages the recommended model: XGBoost-QLIKE trained on the
+full panel (stocks + ETFs). The band multipliers are calibrated on a 2-year
+holdout before the final fit.
+
+```bash
+python -m improvements.risk_model --train     # -> models/risk/ (~1 min)
+python -m improvements.risk_model AAPL SPY    # 20-day vol + calibrated 80% / 95% price ranges
+```
+
+In the latest training, the holdout (Aug 2024 - Aug 2026) had RMSE 0.320 (log vol)
+and bias +0.04, with band multipliers of 1.25 (80%) and 1.99 (95%). The Streamlit
+app shows this model and the Claude risk brief (`agents/risk_brief_agent.py`).
 
 ## Caveats
 

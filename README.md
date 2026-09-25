@@ -34,6 +34,8 @@ collapse to meaningless predictions; `diagnose.py` reproduces that comparison.
 | `agents/neuro_symbolic_agent.py` | Fuses the model ensemble with the symbolic rules and explains the result |
 | `agents/ensemble_agent.py`, `regime_switching_agent.py`, `explainability_agent.py`, `tuning_agent.py` | Auxiliary agents (averaging, K-means regime detection, SHAP explanations, grid-search tuning) |
 | `agents/forecast_agent.py` | Pooled 100-stock model: P(beat SPY over 5 days) + 20-day volatility forecast |
+| `agents/risk_brief_agent.py` | Claude orchestrator: calls the risk, price, news and outlook agents as tools and writes a risk brief |
+| `improvements/` | 22-year S&P 500 volatility study and the production 20-day risk model (see `improvements/README.md`) |
 | `utils/pipeline.py` | Shared feature/windowing/scaling code used by training, evaluation and the app |
 | `utils/panel.py` | Universe download and (Date, Ticker) feature/target panel for the pooled model |
 | `backtest.py` | Walk-forward backtest of the pooled model with trading costs; writes `reports/` |
@@ -122,6 +124,34 @@ small to survive trading costs. Caveats: the universe is today's large caps
 equal weight (Sharpe 1.38) beat every model-driven portfolio. Full tables,
 a Sharpe grid over quantile × cost, and an equity curve are written to
 `reports/`.
+
+## 20-day risk model and AI risk brief
+
+The best-validated component of the project is the 20-day volatility model in
+`improvements/`. It was tested walk-forward on 22 years of S&P 500 data and beat
+trailing, HAR and GARCH volatility (details in `improvements/README.md`).
+
+```bash
+python -m improvements.risk_model --train          # fit once -> models/risk/
+python -m improvements.risk_model AAPL TSLA        # vol forecast + calibrated 80% / 95% ranges
+python -m agents.risk_brief_agent AAPL TSLA        # Claude-written risk brief
+python -m agents.risk_brief_agent AAPL --offline   # template brief, no API call
+```
+
+`RiskBriefAgent` gives Claude (`claude-opus-5`, via the Anthropic SDK tool runner)
+five tools:
+
+- **Market regime:** SPY risk forecast and the VIX.
+- **Risk forecast:** 20-day volatility and calibrated price ranges.
+- **Price summary.**
+- **Recent headlines:** treated as untrusted data.
+- **5-day direction outlook:** labelled weak.
+
+The system prompt includes the backtest evidence, so Claude knows how much
+weight each tool deserves. Server-side refusal fallbacks are enabled
+(`fallbacks="default"`). It needs `ANTHROPIC_API_KEY` or an `ant auth login`
+profile; without them, or on an API error, the agent returns the offline template
+and says why. The app's **Generate risk brief** button uses the same agent.
 
 ## Disclaimer
 

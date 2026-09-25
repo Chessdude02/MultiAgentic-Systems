@@ -5,6 +5,7 @@ xgboost
 yfinance
 ta
 joblib
+anthropic
 optuna
 pandas
 numpy
