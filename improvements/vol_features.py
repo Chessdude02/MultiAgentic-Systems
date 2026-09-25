@@ -29,6 +29,8 @@ FEATURES = [
     "log_dollar_vol", "volume_z",
     # earnings cycle (past dates only)
     "days_since_earn", "earn_react",
+    # 1 for index/sector funds, 0 for single stocks
+    "is_fund",
 ]
 BASE_REQUIRED = [f for f in FEATURES if f not in ("days_since_earn", "earn_react")]
 TARGETS = ["fwd_logvol", "fwd_ret"]
@@ -138,8 +140,8 @@ def ticker_frame(ohlcv, mkt, earn_dates=None, horizon=H):
 
 def build_panel(prices, constituents, earnings, horizon=H, extra=("SPY",)):
     """Stack per-ticker frames. Rows before a stock joined the S&P 500 are
-    dropped (point-in-time universe); ``extra`` tickers (e.g. SPY, used for
-    the vol-targeting test) are kept for their whole history."""
+    dropped (point-in-time universe); ``extra`` tickers (index/sector funds)
+    are kept for their whole history and flagged with ``is_fund``."""
     close = prices["Close"]
     ohlcv_of = lambda s: pd.DataFrame({k: prices[k][s] for k in ("Open", "High", "Low", "Close", "Volume")})
     spy = ohlcv_of("SPY")
@@ -147,12 +149,14 @@ def build_panel(prices, constituents, earnings, horizon=H, extra=("SPY",)):
     added = dict(zip(constituents["Symbol"], constituents["added"]))
 
     frames = []
-    for s in list(constituents["Symbol"]) + list(extra):
+    extra = list(extra)
+    for s in [c for c in constituents["Symbol"] if c not in extra] + extra:
         if s not in close.columns or close[s].notna().sum() < 300:
             continue
         f = ticker_frame(ohlcv_of(s), mkt, earnings.get(s), horizon)
         if f is None:
             continue
+        f["is_fund"] = 1.0 if s in extra else 0.0
         f = f.dropna(subset=BASE_REQUIRED)
         if s not in extra and pd.notna(added.get(s)):
             f = f[f.index >= added[s]]

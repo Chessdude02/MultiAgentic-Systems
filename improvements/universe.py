@@ -64,6 +64,27 @@ def download_prices(symbols, start=START, chunk=100, refresh=False):
     return prices
 
 
+# Index and sector funds: trained on alongside stocks so the model learns what
+# diversified (index-level) volatility looks like.
+ETFS = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB"]
+
+
+def with_etfs(prices, start=START, refresh=False):
+    """Add ETF OHLCV columns (cached separately) to a ``download_prices`` result."""
+    path = _cache(f"prices_etf_{start}.pkl")
+    if os.path.exists(path) and not refresh:
+        etf = pd.read_pickle(path)
+    else:
+        raw = yf.download(ETFS, start=start, interval="1d", auto_adjust=True, progress=False, threads=True)
+        etf = {f: raw[f].astype("float32") for f in ["Open", "High", "Low", "Close", "Volume"]}
+        pd.to_pickle(etf, path)
+    out = {}
+    for f, df in prices.items():
+        new = etf[f][[c for c in etf[f].columns if c not in df.columns]]
+        out[f] = df.join(new, how="outer")
+    return out
+
+
 def _earnings_one(sym):
     try:
         e = yf.Ticker(sym).get_earnings_dates(limit=100)

@@ -17,12 +17,13 @@ properly:
 ## Run
 
 ```bash
-python -m improvements.vol_backtest               # ~6 min after the first download (~4 min)
+python -m improvements.vol_backtest               # ~17 min after the first download (~4 min)
 python -m improvements.vol_backtest --target-vol 0.10 --retrain-every 126
 ```
 
 Data is cached in `improvements/data/` (git-ignored); tables are written to
-`improvements/results/summary.md`, plus `vol_targeting.png`.
+`improvements/results/summary.md`, plus `vol_targeting.png`. The v1 run
+(stocks-only training, five forecasts) is archived in `improvements/results/v1/`.
 
 ## Files
 
@@ -33,7 +34,7 @@ Data is cached in `improvements/data/` (git-ignored); tables are written to
 | `garch.py` | Dependency-free GARCH(1,1) (Gaussian QMLE, `lfilter` recursion) |
 | `vol_backtest.py` | Annual walk-forward with 20-day purge; all evaluation and portfolio tests |
 
-## Results (out-of-sample Oct 2004 - Aug 2026, 1.86M stock-days)
+## v1 results (out-of-sample Oct 2004 - Aug 2026, 1.86M stock-days)
 
 Target: realised volatility over the next 20 trading days.
 
@@ -86,6 +87,35 @@ Target: realised volatility over the next 20 trading days.
 quoting a 20-day price range), use XGBoost, or the Combo when VIX is high.
 For **index-level** vol targeting, trailing or HAR vol is as good or better,
 and this pooled stock model should not be used.
+
+## v2: attempts to fix the v1 weaknesses
+
+The numbers above are v1 (tables in `results/v1/`). v2 (`results/summary.md`,
+same data and walk-forward) tested four fixes, and only two of them worked.
+All settings were fixed before the v2 run.
+
+| Fix | Idea | Outcome |
+|---|---|---|
+| **Train on 13 index/sector ETFs too** (+ `is_fund` flag) | Remove the ~22% over-prediction of index vol | **Worked.** SPY forecast bias +0.200 → **+0.039** (log); stock accuracy unchanged (R² 0.558). |
+| **XGBoost-QLIKE** (custom objective) | Penalise under-predicting risk | **Worked. Best risk model.** QLIKE 0.298 vs 0.331 for XGBoost (DM t = 3.3); best QLIKE in every VIX regime; forecasts >30% too low fall from 12.0% to **9.1%**; bands already honest (82.2% / 95.0%). Costs a little RMSE (R² 0.541 vs 0.558). |
+| **Calibrated bands** (empirical past-OOS quantiles) | Fix the 95% band being too narrow | **Partly worked.** XGBoost 95% coverage 93.7% → 94.5%; still slightly narrow in calm markets (VIX < 15). |
+| **Stacked** regime-aware blend (weights vary with VIX, learned on earlier folds' OOS forecasts) | Get XGBoost in calm markets and the Combo in crises | **Failed.** Worse than XGBoost on MSE (DM t = -2.8). It was trained on calm 2004-07 data and extrapolated badly into 2008-09 (RMSE 0.451 vs 0.406); still weakest with VIX > 30. It wins in many calm years after 2012. |
+| **Bias correction** (subtract each ticker's recent realised error) | Remove persistent per-ticker bias | **Failed for stocks.** Adds noise (QLIKE 0.355 vs 0.331). Removes SPY bias (-0.004) but doesn't improve vol targeting. |
+
+**Vol targeting is still best with plain trailing vol.** Removing XGBoost's
+index bias lifted its SPY vol-targeting Sharpe from 0.81 to 0.84 (exposure
+0.76 → 0.92), but trailing vol (0.88) and the Stacked blend (0.87) still do
+better, and XGBoost's worst quarter got worse (27% vs 23% vol). Vol targeting
+rewards reacting quickly to vol spikes more than it rewards average
+forecast accuracy.
+
+**Updated recommendation**
+
+- Single-stock risk (sizing, 20-day ranges, stop distances): **XGBoost-QLIKE**,
+  with calibrated bands. It has the fewest dangerous under-predictions in
+  every market regime.
+- Point forecasts judged by squared error: plain XGBoost.
+- Index vol targeting: trailing 22-day vol. It's simpler and still the best here.
 
 ## Caveats
 
