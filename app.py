@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from agents.data_agent import fetch_stock_data
 from agents.feature_engineer_agent import FeatureEngineerAgent
+from agents.forecast_agent import ForecastAgent, outlook
 from agents.neuro_symbolic_agent import NeuroSymbolicAgent
 from agents.prediction_agent import PredictionAgent
 
@@ -13,6 +14,16 @@ INTERVAL_STEP = {"1d": pd.offsets.BDay(1), "1h": pd.Timedelta(hours=1), "30m": p
 @st.cache_resource
 def load_predictor():
     return PredictionAgent().load_models("models")
+
+
+@st.cache_resource
+def load_forecaster():
+    return ForecastAgent.load()
+
+
+@st.cache_data(ttl=3600)
+def load_outlook(symbol):
+    return outlook(symbol, agent=load_forecaster())
 
 
 st.title("📈 Stock Price Predictor")
@@ -64,3 +75,25 @@ if st.button("Predict"):
                label=f"Prediction for {next_date.strftime('%b %d')}")
     ax.legend()
     st.pyplot(fig)
+
+    # 🔭 Pooled multi-ticker model (see backtest.py)
+    st.subheader("🔭 Multi-day outlook (pooled 100-stock model)")
+    try:
+        view = load_outlook(symbol)
+    except FileNotFoundError as e:
+        st.info(str(e))
+    except ValueError as e:
+        st.warning(f"Outlook unavailable: {e}")
+    else:
+        c1, c2 = st.columns(2)
+        c1.metric(f"P(beats SPY over next {view['horizon']} days)", f"{view['p_beat_spy']:.1%}")
+        c2.metric(f"Forecast {view['vol_horizon']}-day volatility (annualised)",
+                  f"{view['forecast_vol']:.1%}",
+                  f"{view['forecast_vol'] - view['trailing_vol']:+.1%} vs trailing 20d",
+                  delta_color="inverse")
+        st.caption(
+            f"As of {view['as_of']}; model trained through {view['trained_through']}. "
+            "In walk-forward tests the volatility forecast clearly beats the trailing "
+            "estimate, while the direction signal is weak (AUC ~0.51) - treat it as a "
+            "slight tilt, not a trade signal."
+        )

@@ -33,7 +33,10 @@ collapse to meaningless predictions; `diagnose.py` reproduces that comparison.
 | `agents/symbolic_override_agent.py` | RSI/MACD rule-based price adjustment |
 | `agents/neuro_symbolic_agent.py` | Fuses the model ensemble with the symbolic rules and explains the result |
 | `agents/ensemble_agent.py`, `regime_switching_agent.py`, `explainability_agent.py`, `tuning_agent.py` | Auxiliary agents (averaging, K-means regime detection, SHAP explanations, grid-search tuning) |
+| `agents/forecast_agent.py` | Pooled 100-stock model: P(beat SPY over 5 days) + 20-day volatility forecast |
 | `utils/pipeline.py` | Shared feature/windowing/scaling code used by training, evaluation and the app |
+| `utils/panel.py` | Universe download and (Date, Ticker) feature/target panel for the pooled model |
+| `backtest.py` | Walk-forward backtest of the pooled model with trading costs; writes `reports/` |
 | `train.py` | Trains all models and saves them to `models/` |
 | `evaluate.py` | Evaluates saved (or freshly retrained) models on a held-out split |
 | `diagnose.py` | Experiment showing why scaling + return targets are needed |
@@ -86,7 +89,39 @@ streamlit run app.py
 Enter a ticker, period and interval and click **Predict** to see the engineered
 features, the predicted next close (with change vs. last close), each model's
 predicted return, the symbolic-rule explanation and a chart. The app warns when
-the chosen interval differs from the one the models were trained on.
+the chosen interval differs from the one the models were trained on. If a
+pooled model exists, the app also shows a 5-day "beats SPY" probability and a
+20-day volatility forecast for the ticker.
+
+## Pooled multi-stock model and walk-forward backtest
+
+```bash
+python backtest.py --save              # ~100 large caps, 6y history, saves models/pooled/
+python backtest.py --quantile 0.3 --cost-bps 5
+```
+
+One gradient-boosted model is trained on ~100 large caps at once (≈130k rows)
+using scale-free, market-relative features (momentum, volatility, beta, trend,
+volume, SPY/VIX regime), so it also applies to tickers outside the universe.
+It predicts **P(stock beats SPY over the next 5 days)** and **realised
+volatility over the next 20 days**. Models are refit every quarter on all prior
+data with a 20-day purge gap and scored only on the following quarter.
+
+Out-of-sample results, Jul 2023 – Sep 2026, 10 bps per unit turnover:
+
+| | Result |
+| --- | --- |
+| Volatility forecast | R² 0.44 vs 0.05 for trailing 20-day vol; median error 21% vs 27% |
+| Inverse-vol weighting | Sharpe 1.25 with model forecast vs 1.09 with trailing vol, half the turnover |
+| Direction signal | AUC 0.51, rank-IC 0.022; returns rise across the bottom nine deciles |
+| Direction long/short | Sharpe ≈0.05 net, ≈0.3 gross (20% quantile, smoothed, 2x hold buffer) |
+
+The volatility forecast is the useful part; the direction edge is real but too
+small to survive trading costs. Caveats: the universe is today's large caps
+(survivorship bias) and the test window is a strong bull market, where plain
+equal weight (Sharpe 1.38) beat every model-driven portfolio. Full tables,
+a Sharpe grid over quantile × cost, and an equity curve are written to
+`reports/`.
 
 ## Disclaimer
 

@@ -6,7 +6,7 @@ setup(
     name='multiagent-predictor',
     version='0.1.0',
     packages=find_packages(include=['agents', 'utils']),
-    py_modules=['cli', 'train', 'app', 'simulator'],
+    py_modules=['cli', 'train', 'app', 'simulator', 'backtest', 'evaluate'],
     install_requires=[
         'yfinance>=0.2.31',
         'pandas>=2.0.0',
